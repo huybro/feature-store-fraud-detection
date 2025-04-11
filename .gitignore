@@ -24,9 +24,17 @@ parts/
 sdist/
 var/
 wheels/
-dist/
-build/
-downloads/
+*.egg-info/
+.installed.cfg
+*.egg
+node_modules
+# Keep environment variables out of version control
+.env
+
+# Virtual Environment
+venv/
+ENV/
+env/
 
 # IDEs and editors
 .idea/
