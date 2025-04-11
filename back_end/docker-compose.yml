@@ -61,7 +61,7 @@ services:
       - prisma-network
 
 volumes:
-  postgres_data:
+  postgres_data_532:
 
 networks:
   prisma-network:
