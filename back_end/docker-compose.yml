@@ -39,7 +39,7 @@ services:
       timeout: 2s
       retries: 20
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data2
 
   prisma-studio:
     image: node:lts-alpine3.17
