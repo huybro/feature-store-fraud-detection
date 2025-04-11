@@ -1,16 +1,17 @@
 [tool.poetry]
-name = "fastapi-template"
+name = "backend"
 version = "0.1.0"
 description = ""
 authors = ["Your Name <you@example.com>"]
-
+package-mode = false
 [tool.poetry.dependencies]
 python = "^3.10"
 
 # Core dependencies
-fastapi = "^0.115.12"
-uvicorn = "^0.34.0"
-pydantic = "^2.11.1"
+fastapi = "^0.104.1"
+uvicorn = "^0.24.0"
+pydantic = ">=2.9,<3.0"
+typing-extensions = ">=4.8"
 python-jose = "^3.3.0"
 passlib = "^1.7.4"
 python-multipart = "^0.0.6"
@@ -18,11 +19,13 @@ bcrypt = "^4.0.1"
 python-dotenv = "^1.1.0"
 
 # AI and Langchain
-openai = "^1.70.0"
+openai = "^1.52.2"
 langchain = "^0.3.22"
+langchain-core = "^0.3.21"
 langchain-community = "^0.3.20"
 langchain-openai = "^0.3.11"
 tiktoken = "^0.9.0"
+anthropic = "^0.18.1"
 
 # Database
 psycopg2-binary = "^2.9.9"
@@ -42,6 +45,9 @@ pytest-cov = "^4.1.0"
 
 # Development
 jupyter = "^1.0.0"
+jupyterlab = "3.5.1"
+jupyter-server = ">=1.16,<3.0"
+nbclassic = "^0.4.8"
 black = "^23.11.0"
 flake8 = "^6.1.0"
 mypy = "^1.7.0"
