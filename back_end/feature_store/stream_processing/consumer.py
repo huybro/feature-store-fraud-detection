@@ -10,7 +10,7 @@ import os
 env = StreamExecutionEnvironment.get_execution_environment()
 
 # Path to JAR files
-jars_dir = "/Users/huybro/Desktop/feature_store_fraud_detection/jars/" #Modify to your directory
+jars_dir = "./jars" 
 
 # Add the Kafka connector JAR with proper file:// protocol
 jar_path = f"file://{os.path.abspath(os.path.join(jars_dir, 'flink-connector-kafka-3.3.0-1.20.jar'))}" 
