@@ -10,6 +10,7 @@ venv/
 ENV/
 env/
 .Python
+.flink-env/
 
 # Installer logs
 .installed.cfg
