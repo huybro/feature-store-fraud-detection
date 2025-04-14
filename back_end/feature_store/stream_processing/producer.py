@@ -11,6 +11,7 @@ producer = KafkaProducer(
 
 def generate_fake_transaction():
     raw_data = {
+        "id": 0,
         "transaction_id": random.randint(100000, 999999),
         "amount": round(random.uniform(10, 500), 2),
         "merch_long": random.randint(-130,130),
