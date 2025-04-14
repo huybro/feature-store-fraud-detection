@@ -1,13 +1,18 @@
-from pyflink.datastream import StreamExecutionEnvironment
-from pyflink.common.serialization import DeserializationSchema, SimpleStringSchema
-from pyflink.common.typeinfo import Types
-from pyflink.common import WatermarkStrategy
+from pyflink.datastream import StreamExecutionEnvironment, TimeCharacteristic
+from pyflink.common.serialization import SimpleStringSchema
+from pyflink.common import Time, WatermarkStrategy, Types, Duration
 from pyflink.datastream.connectors.kafka import FlinkKafkaConsumer
-
+from pyflink.datastream.functions import ProcessWindowFunction, RuntimeContext
+from pyflink.datastream.window import TumblingEventTimeWindows, SlidingEventTimeWindows
+from pyflink.datastream.state import ValueStateDescriptor
+from pyflink.common.watermark_strategy import TimestampAssigner
+from math import radians, sin, cos, sqrt, atan2
+import datetime
 import json
 import os
 
 env = StreamExecutionEnvironment.get_execution_environment()
+env.set_stream_time_characteristic(TimeCharacteristic.EventTime)
 
 # Path to JAR files
 jars_dir = "./jars" 
@@ -35,7 +40,68 @@ stream = env.add_source(
 
 # Parse JSON
 parsed = stream.map(lambda raw: json.loads(raw), output_type=Types.MAP(Types.STRING(), Types.STRING()))
-parsed.print()
+
+class TransactionTimestampAssigner(TimestampAssigner):
+    def extract_timestamp(self, element, record_timestamp):
+        timestamp = int(datetime.datetime.fromisoformat(element['timestamp']).timestamp() * 1000)
+        return timestamp
+
+class TxnCountLast10Min(ProcessWindowFunction):
+    def process(self, key, context, elements, out):
+        elements_list = list(elements)
+        count = len(elements_list)
+        out.collect({'txn_count': str(count)})
+
+class AvgAmtLast1Hour(ProcessWindowFunction):
+    def process(self, key, context, elements, out):
+        elements_list = list(elements)
+        amounts = [float(e['amount']) for e in elements_list]
+        avg = sum(amounts) / len(amounts)
+        out.collect({'avg_amt_last_1_hour': str(avg)})
+
+def haversine(lat1, lon1, lat2, lon2):
+    R = 6371  # Earth radius in km
+    lat1, lon1, lat2, lon2 = map(float, [lat1, lon1, lat2, lon2])
+    dlat = radians(lat2 - lat1)
+    dlon = radians(lon2 - lon1)
+    a = sin(dlat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2) ** 2
+    return R * 2 * atan2(sqrt(a), sqrt(1 - a))
+
+# Assign timestamps and watermarks
+parsed = parsed.assign_timestamps_and_watermarks(
+    WatermarkStrategy
+        .for_bounded_out_of_orderness(Duration.of_seconds(5))   
+        .with_timestamp_assigner(TransactionTimestampAssigner())
+)
+
+# Calculate distance between buyer and merchant + float conversion for amount
+distance_included = parsed.map(
+    lambda x : {
+        **x,
+        'distance_to_merchant': str(haversine(x['lat'], x['long'], x['merch_lat'], x['merch_long']))
+    },
+    output_type=Types.MAP(Types.STRING(), Types.STRING())
+)
+
+# Count transactions in the last 10 minutes (sliding every 1 minute)
+txn_count = distance_included.window_all(
+    SlidingEventTimeWindows.of(Time.minutes(10), Time.minutes(1))
+).process(
+    TxnCountLast10Min(),
+    output_type=Types.MAP(Types.STRING(), Types.STRING())
+)
+
+# Average amount in the last 1 hour (sliding every 1 minute)
+avg_amount = distance_included.window_all(
+    SlidingEventTimeWindows.of(Time.hours(1), Time.minutes(1))
+).process(
+    AvgAmtLast1Hour(),
+    output_type=Types.MAP(Types.STRING(), Types.STRING())
+)
+
+distance_included.print()
+txn_count.print()
+avg_amount.print()
 
 # Execute the stream processing pipeline
 env.execute("PyFlink Kafka Stream")

@@ -11,7 +11,7 @@ df = df.drop(columns=['Unnamed: 0'])
 df['merch_zipcode'] = df['merch_zipcode'].fillna(-1)
 
 # Save the preprocessed DataFrame to a CSV file
-output_file = 'data/credit_card_transactions.csv'
+output_file = './back_end/data/credit_card_transactions.csv'
 df.to_csv(output_file, index=False)
 print(f"Preprocessed data saved to {output_file}")
 
