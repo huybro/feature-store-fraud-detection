@@ -3,6 +3,7 @@ import json
 import time
 import random
 from datetime import datetime
+import numpy as np
 
 producer = KafkaProducer(
     bootstrap_servers='localhost:9092',
@@ -11,13 +12,12 @@ producer = KafkaProducer(
 
 def generate_fake_transaction():
     raw_data = {
-        "id": 0,
-        "transaction_id": random.randint(100000, 999999),
-        "amount": round(random.uniform(10, 500), 2),
-        "merch_long": random.randint(-130,130),
-        "merch_lat": random.randint(-130,130),
-        "long": random.randint(-130,130),
-        "lat": random.randint(-130,130),
+        "cc_num": str(abs(np.random.normal(loc=4.17e+17, scale=1.3e+18))),
+        "amount": round(np.random.exponential(scale=70), 2),  # skewed distribution
+        "lat": round(np.random.normal(loc=38.5, scale=5.1), 6),
+        "long": round(np.random.normal(loc=-90.2, scale=13.7), 6),
+        "merch_lat": round(np.random.normal(loc=38.5, scale=5.1), 6),
+        "merch_long": round(np.random.normal(loc=-90.2, scale=13.7), 6),
         "timestamp": datetime.now().isoformat()
     }
     return {k: str(v) for k, v in raw_data.items()}

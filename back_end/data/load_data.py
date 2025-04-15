@@ -10,8 +10,15 @@ df = pd.read_csv("hf://datasets/pointe77/credit-card-transaction/" + splits["tra
 df = df.drop(columns=['Unnamed: 0'])
 df['merch_zipcode'] = df['merch_zipcode'].fillna(-1)
 
+is_sorted = df['cc_num'].is_monotonic_increasing
+print(f"Is cc_num sorted in ascending order? {is_sorted}")
+
+# Print summary statistics (mean, std, min, max, etc.)
+print("\n📊 Summary Statistics:\n")
+print(df[['cc_num', 'amt', 'lat', 'long', 'merch_lat', 'merch_long']].describe(include='all'))
+
 # Save the preprocessed DataFrame to a CSV file
-output_file = './back_end/data/credit_card_transactions.csv'
+"""output_file = './back_end/data/credit_card_transactions.csv'
 df.to_csv(output_file, index=False)
-print(f"Preprocessed data saved to {output_file}")
+print(f"Preprocessed data saved to {output_file}")"""
 

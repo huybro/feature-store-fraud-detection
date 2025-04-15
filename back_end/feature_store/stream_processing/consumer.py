@@ -22,17 +22,22 @@ class TxnCountLast10Min(ProcessWindowFunction):
     def process(self, key, context: ProcessWindowFunction.Context, elements: Iterable[dict]):
         elements_list = list(elements)
         count = len(elements_list)
-        yield({'txn_count': str(count)})
-
+        yield({
+            'cc_num': key,
+            'txn_count_last_10_min': str(count)
+        })
 class AvgAmtLast1Hour(ProcessWindowFunction):
     def process(self, key, context: ProcessWindowFunction.Context, elements: Iterable[dict]):
         elements_list = list(elements)
         amounts = [float(e['amount']) for e in elements_list]
         avg = sum(amounts) / len(amounts)
-        yield({'avg_amt_last_1_hour': str(avg)})
-
+        yield({
+            'cc_num': key,
+            'avg_amt_last_1_hour': str(avg)
+        })
 def haversine(lat1, lon1, lat2, lon2):
-    R = 6371  # Earth radius in km
+    R = 3963
+  # Earth radius in miles
     lat1, lon1, lat2, lon2 = map(float, [lat1, lon1, lat2, lon2])
     dlat = radians(lat2 - lat1)
     dlon = radians(lon2 - lon1)
@@ -43,7 +48,7 @@ env = StreamExecutionEnvironment.get_execution_environment()
 env.set_stream_time_characteristic(TimeCharacteristic.EventTime)
 
 # Path to JAR files
-jars_dir = "./jars" 
+jars_dir = "/Users/huybro/Desktop/feature_store_fraud_detection/back_end/feature_store/stream_processing/jars" 
 
 # Add the Kafka connector JAR with proper file:// protocol
 jar_path = f"file://{os.path.abspath(os.path.join(jars_dir, 'flink-connector-kafka-3.3.0-1.20.jar'))}" 
@@ -87,14 +92,14 @@ distance_included = parsed.map(
 
 # Count transactions in the last 10 minutes (sliding every 1 minute) (currently testing with a smaller window of 10 seconds)
 txn_count = distance_included \
-    .key_by(lambda t: t['id']) \
+    .key_by(lambda t: t['cc_num']) \
     .window(SlidingProcessingTimeWindows.of(Time.seconds(10), Time.seconds(1))) \
     .process(TxnCountLast10Min(),output_type=Types.MAP(Types.STRING(), Types.STRING()))
 
 
 # Average amount in the last 1 hour (sliding every 1 minute) (currently testing with a smaller window of 10 seconds)
 avg_amount = distance_included \
-    .key_by(lambda t: t['id']) \
+    .key_by(lambda t: t['cc_num']) \
     .window(SlidingProcessingTimeWindows.of(Time.seconds(10), Time.seconds(1))) \
     .process(AvgAmtLast1Hour(),output_type=Types.MAP(Types.STRING(), Types.STRING()))
 
