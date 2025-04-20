@@ -86,14 +86,14 @@ services:
     networks:
       - prisma-network
   
-  redis:
-    image: redis:7
-    container_name: redis
-    restart: always
-    ports:
-      - "6379:6379"
+  pyspark:
+    image: bitnami/spark:latest
+    depends_on:
+      - postgres_db
+    volumes:
+      - ./data:/app/data
     networks:
-      - prisma-network 
+      - prisma-network
       
 volumes:
   postgres_data_532:

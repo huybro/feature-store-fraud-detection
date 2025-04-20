@@ -12,3 +12,21 @@ model User {
   email String  @unique
   name  String?
 }
+
+
+model CreditCardFeature {
+  id                     Int      @id @default(autoincrement())
+  cc_num                BigInt
+  amt                   Float
+  hour_of_day           Int
+  day_of_week           Int
+  age_at_txn            Float
+  distance_to_merchant  Float
+  txn_count_last_10_min Int
+  avg_amt_last_1_hour   Float
+  category              String
+  gender                String
+  city_pop              Int
+  is_fraud              Int
+  feature_timestamp     DateTime @default(now())
+}

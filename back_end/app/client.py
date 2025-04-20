@@ -11,3 +11,4 @@ async def disconnect_db():
     """Disconnect from the database."""
     if prisma_client.is_connected():
         await prisma_client.disconnect()
+
