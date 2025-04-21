@@ -28,5 +28,5 @@ model CreditCardFeature {
   gender                String
   city_pop              Int
   is_fraud              Int
-  feature_timestamp     DateTime @default(now())
+  feature_timestamp     DateTime 
 }

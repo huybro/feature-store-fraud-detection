@@ -25,11 +25,18 @@ async def ingest_features(features: List[FeatureRow]):
                     "category": feature.category,
                     "gender": feature.gender,
                     "city_pop": feature.city_pop,
+                    "feature_timestamp": feature.trans_date_trans_time,
                     "is_fraud": feature.is_fraud
-                    # feature_timestamp will default to now() from Prisma schema
                 }
             )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error inserting features: {str(e)}")
 
     return {"status": "success", "inserted": len(features)}
+
+@router.delete("/features/clear")
+async def clear_features():
+    if not prisma.is_connected():
+        await prisma.connect()
+    await prisma.creditcardfeature.delete_many()
+    return {"status": "success", "message": "All features deleted."}

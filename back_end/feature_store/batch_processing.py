@@ -45,7 +45,7 @@ df = df.withColumn("txn_count_last_10_min", count("*").over(window_spec_10_min))
        .withColumn("avg_amt_last_1_hour", avg("amt").over(window_spec_1_hour))
 
 df = df.select("cc_num", "amt", "hour_of_day", "day_of_week", "age_at_txn", "distance_to_merchant",
-               "txn_count_last_10_min", "avg_amt_last_1_hour", "category", "gender", "city_pop", "is_fraud")
+               "txn_count_last_10_min", "avg_amt_last_1_hour", "category", "gender", "city_pop", "trans_date_trans_time","is_fraud")
 
 # Save to CSV (writes to directory with part files)
 output_path = os.path.join(base_dir, 'data', 'output_features')

@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from datetime import datetime
 
 class FeatureRow(BaseModel):
     cc_num: int
@@ -12,4 +13,5 @@ class FeatureRow(BaseModel):
     category: str
     gender: str
     city_pop: int
+    trans_date_trans_time: datetime
     is_fraud: int
