@@ -6,6 +6,13 @@ from datetime import date, datetime, time
 
 router = APIRouter()
 
+@router.delete("/features/clear")
+async def clear_features():
+     if not prisma.is_connected():
+         await prisma.connect()
+     await prisma.creditcardfeature.delete_many()
+     return {"status": "success", "message": "All features deleted."}
+
 @router.post("/features/batch")
 async def ingest_features(features: List[FeatureRow]):
     if not prisma.is_connected():
