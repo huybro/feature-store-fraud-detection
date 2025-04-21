@@ -13,7 +13,6 @@ model User {
   name  String?
 }
 
-
 model CreditCardFeature {
   id                     Int      @id @default(autoincrement())
   cc_num                BigInt
