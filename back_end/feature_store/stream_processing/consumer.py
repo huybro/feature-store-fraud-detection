@@ -1,8 +1,8 @@
-from pyflink.datastream import StreamExecutionEnvironment, TimeCharacteristic
+from pyflink.datastream import StreamExecutionEnvironment, TimeCharacteristic, KeyedStream
 from pyflink.common.serialization import SimpleStringSchema
 from pyflink.common import Time, WatermarkStrategy, Types, Duration
 from pyflink.datastream.connectors.kafka import FlinkKafkaConsumer
-from pyflink.datastream.functions import ProcessWindowFunction, RuntimeContext
+from pyflink.datastream.functions import ProcessWindowFunction, RuntimeContext, CoProcessFunction
 from pyflink.datastream.window import TumblingEventTimeWindows, SlidingEventTimeWindows
 from pyflink.datastream.state import ValueStateDescriptor
 from pyflink.common.watermark_strategy import TimestampAssigner
@@ -26,6 +26,7 @@ class TxnCountLast10Min(ProcessWindowFunction):
             'cc_num': key,
             'txn_count_last_10_min': str(count)
         })
+
 class AvgAmtLast1Hour(ProcessWindowFunction):
     def process(self, key, context: ProcessWindowFunction.Context, elements: Iterable[dict]):
         elements_list = list(elements)
@@ -35,6 +36,44 @@ class AvgAmtLast1Hour(ProcessWindowFunction):
             'cc_num': key,
             'avg_amt_last_1_hour': str(avg)
         })
+
+class CombineTxnAndAvg(CoProcessFunction):
+    def open(self, runtime_context: RuntimeContext):
+        self.txn_count_state = runtime_context.get_state(ValueStateDescriptor("txn_count", Types.MAP(Types.STRING(), Types.STRING())))
+        self.avg_amt_state = runtime_context.get_state(ValueStateDescriptor("avg_amt", Types.MAP(Types.STRING(), Types.STRING())))
+
+    def process_element1(self, value, ctx: CoProcessFunction.Context):
+        self.txn_count_state.update(value)
+        avg_amt = self.avg_amt_state.value()
+        if avg_amt:
+            combined = {**value, **avg_amt}
+            yield combined
+
+    def process_element2(self, value, ctx: CoProcessFunction.Context):
+        self.avg_amt_state.update(value)
+        txn_count = self.txn_count_state.value()
+        if txn_count:
+            combined = {**txn_count, **value}
+            yield combined
+
+class FinalJoiner(CoProcessFunction):
+    def open(self, runtime_context: RuntimeContext):
+        self.distance_state = runtime_context.get_state(ValueStateDescriptor("distance", Types.MAP(Types.STRING(), Types.STRING())))
+        self.stats_state = runtime_context.get_state(ValueStateDescriptor("stats", Types.MAP(Types.STRING(), Types.STRING())))
+
+    def process_element1(self, distance, ctx: CoProcessFunction.Context):
+        self.distance_state.update(distance)
+        stats = self.stats_state.value()
+        if stats:
+            yield {**distance, **stats}
+
+    def process_element2(self, stats, ctx: CoProcessFunction.Context):
+        self.stats_state.update(stats)
+        distance = self.distance_state.value()
+        if distance:
+            yield {**distance, **stats}
+
+
 def haversine(lat1, lon1, lat2, lon2):
     R = 3963
   # Earth radius in miles
@@ -48,7 +87,7 @@ env = StreamExecutionEnvironment.get_execution_environment()
 env.set_stream_time_characteristic(TimeCharacteristic.EventTime)
 
 # Path to JAR files
-jars_dir = "/Users/huybro/Desktop/feature_store_fraud_detection/back_end/feature_store/stream_processing/jars" 
+jars_dir = "./jars" 
 
 # Add the Kafka connector JAR with proper file:// protocol
 jar_path = f"file://{os.path.abspath(os.path.join(jars_dir, 'flink-connector-kafka-3.3.0-1.20.jar'))}" 
@@ -96,16 +135,37 @@ txn_count = distance_included \
     .window(SlidingProcessingTimeWindows.of(Time.seconds(10), Time.seconds(1))) \
     .process(TxnCountLast10Min(),output_type=Types.MAP(Types.STRING(), Types.STRING()))
 
-
 # Average amount in the last 1 hour (sliding every 1 minute) (currently testing with a smaller window of 10 seconds)
 avg_amount = distance_included \
     .key_by(lambda t: t['cc_num']) \
     .window(SlidingProcessingTimeWindows.of(Time.seconds(10), Time.seconds(1))) \
     .process(AvgAmtLast1Hour(),output_type=Types.MAP(Types.STRING(), Types.STRING()))
 
-distance_included.print()
-txn_count.print()
-avg_amount.print()
+# distance_included.print()
+# txn_count.print()
+# avg_amount.print()
+
+# Key each stream by cc_num for join compatibility
+txn_count_keyed = txn_count.key_by(lambda x: x['cc_num'], key_type=Types.STRING())
+avg_amount_keyed = avg_amount.key_by(lambda x: x['cc_num'], key_type=Types.STRING())
+
+# Connect txn count and avg amount and combine
+combined_txn_avg = txn_count_keyed.connect(avg_amount_keyed).process(
+    CombineTxnAndAvg(),
+    output_type=Types.MAP(Types.STRING(), Types.STRING())
+)
+
+distance_keyed = distance_included.key_by(lambda x: x['cc_num'], key_type=Types.STRING())
+combined_txn_avg_keyed = combined_txn_avg.key_by(lambda x: x['cc_num'], key_type=Types.STRING())
+
+# Combine distance with the joined stats
+final_stream = distance_keyed.connect(combined_txn_avg_keyed).process(
+    FinalJoiner(),
+    output_type=Types.MAP(Types.STRING(), Types.STRING())
+)
+
+# Print final merged result
+final_stream.print()
 
 # Execute the stream processing pipeline
 env.execute("PyFlink Kafka Stream")
