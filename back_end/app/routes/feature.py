@@ -35,13 +35,6 @@ async def ingest_features(features: List[FeatureRow]):
 
     return {"status": "success", "inserted": len(features)}
 
-@router.delete("/features/clear")
-async def clear_features():
-    if not prisma.is_connected():
-        await prisma.connect()
-    await prisma.creditcardfeature.delete_many()
-    return {"status": "success", "message": "All features deleted."}
-
 # sample : http://localhost:8000/api/v1/features/by-ccnum/60422928733
 @router.get("/features/by-ccnum/{cc_num}", response_model=List[FeatureRowRetrieve])
 async def get_features_by_ccnum(cc_num: str):
