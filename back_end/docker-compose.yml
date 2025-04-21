@@ -85,7 +85,7 @@ services:
       - zookeeper
     networks:
       - prisma-network
-  
+
   pyspark:
     image: bitnami/spark:latest
     depends_on:
@@ -94,7 +94,21 @@ services:
       - ./data:/app/data
     networks:
       - prisma-network
-      
+
+  redis:
+    image: redis:7
+    container_name: redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - prisma-network
+
 volumes:
   postgres_data_532:
 
