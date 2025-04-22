@@ -2,7 +2,7 @@ from pyflink.datastream import StreamExecutionEnvironment, TimeCharacteristic, K
 from pyflink.common.serialization import SimpleStringSchema
 from pyflink.common import Time, WatermarkStrategy, Types, Duration
 from pyflink.datastream.connectors.kafka import FlinkKafkaConsumer
-from pyflink.datastream.functions import ProcessWindowFunction, RuntimeContext, CoProcessFunction
+from pyflink.datastream.functions import ProcessWindowFunction, RuntimeContext, CoProcessFunction, SinkFunction, MapFunction
 from pyflink.datastream.window import TumblingEventTimeWindows, SlidingEventTimeWindows
 from pyflink.datastream.state import ValueStateDescriptor
 from pyflink.common.watermark_strategy import TimestampAssigner
@@ -10,6 +10,7 @@ from pyflink.datastream.window import SlidingProcessingTimeWindows
 from math import radians, sin, cos, sqrt, atan2
 from typing import Iterable
 import datetime
+import redis
 import json
 import os
 
@@ -73,6 +74,60 @@ class FinalJoiner(CoProcessFunction):
         if distance:
             yield {**distance, **stats}
 
+class RedisWriter(MapFunction):
+    """Map function that writes data to Redis and passes it through."""
+    
+    def __init__(self, host='localhost', port=6379, db=0, ttl=3600):
+        self.host = host
+        self.port = port
+        self.db = db
+        self.ttl = ttl
+        self.redis_client = None
+    
+    def open(self, runtime_context):
+        """Initialize Redis client when the function is opened."""
+        self.redis_client = redis.Redis(host=self.host, port=self.port, db=self.db)
+        print(f"Connected to Redis at {self.host}:{self.port}")
+    
+    def map(self, value):
+        """Write value to Redis and return it unchanged."""
+        try:
+            if not self.redis_client:
+                self.redis_client = redis.Redis(host=self.host, port=self.port, db=self.db)
+            
+            # Get transaction ID or generate one if not present
+            txn_id = value.get('transaction_id', f"txn_{datetime.datetime.now().timestamp()}")
+            
+            # Use cc_num as key prefix
+            key_prefix = f"txn:{value['cc_num']}"
+            
+            # Store full transaction data as a hash
+            transaction_key = f"{key_prefix}:data:{txn_id}"
+            self.redis_client.hset(transaction_key, mapping=value)
+            self.redis_client.expire(transaction_key, self.ttl)
+            
+            # Store stats in a separate key for quick access
+            stats_key = f"{key_prefix}:stats"
+            stats = {
+                'txn_count_last_10_min': value.get('txn_count_last_10_min', '0'),
+                'avg_amt_last_1_hour': value.get('avg_amt_last_1_hour', '0'),
+                'distance_to_merchant': value.get('distance_to_merchant', '0'),
+                'last_update': datetime.datetime.now().isoformat()
+            }
+            self.redis_client.hset(stats_key, mapping=stats)
+            
+            # Add to a sorted set for time-based queries (score is timestamp)
+            if 'timestamp' in value:
+                timestamp = int(datetime.datetime.fromisoformat(value['timestamp']).timestamp())
+                self.redis_client.zadd(f"{key_prefix}:timeline", {txn_id: timestamp})
+                self.redis_client.expire(f"{key_prefix}:timeline", self.ttl)
+                
+            print(f"Stored transaction {txn_id} in Redis for card {value['cc_num']}")
+        except Exception as e:
+            print(f"Redis write error: {e}")
+        
+        # Return the input value unchanged
+        return value
 
 def haversine(lat1, lon1, lat2, lon2):
     R = 3963
@@ -129,16 +184,16 @@ distance_included = parsed.map(
     output_type=Types.MAP(Types.STRING(), Types.STRING())
 )
 
-# Count transactions in the last 10 minutes (sliding every 1 minute) (currently testing with a smaller window of 10 seconds)
+# Count transactions in the last 10 minutes (sliding every 1 minute) (currently testing with a smaller window of 2 minutes)
 txn_count = distance_included \
     .key_by(lambda t: t['cc_num']) \
-    .window(SlidingProcessingTimeWindows.of(Time.seconds(10), Time.seconds(1))) \
+    .window(SlidingProcessingTimeWindows.of(Time.minutes(2), Time.seconds(20))) \
     .process(TxnCountLast10Min(),output_type=Types.MAP(Types.STRING(), Types.STRING()))
 
-# Average amount in the last 1 hour (sliding every 1 minute) (currently testing with a smaller window of 10 seconds)
+# Average amount in the last 1 hour (sliding every 1 minute) (currently testing with a smaller window of 5 minutes)
 avg_amount = distance_included \
     .key_by(lambda t: t['cc_num']) \
-    .window(SlidingProcessingTimeWindows.of(Time.seconds(10), Time.seconds(1))) \
+    .window(SlidingProcessingTimeWindows.of(Time.minutes(5), Time.minutes(1))) \
     .process(AvgAmtLast1Hour(),output_type=Types.MAP(Types.STRING(), Types.STRING()))
 
 # distance_included.print()
@@ -166,6 +221,12 @@ final_stream = distance_keyed.connect(combined_txn_avg_keyed).process(
 
 # Print final merged result
 final_stream.print()
+
+# Store on Redis
+final_stream \
+    .map(RedisWriter(host='localhost', port=6379, db=0, ttl=86400), 
+         output_type=Types.MAP(Types.STRING(), Types.STRING())) \
+    .print("Stored in Redis: ")
 
 # Execute the stream processing pipeline
 env.execute("PyFlink Kafka Stream")
