@@ -1,10 +1,21 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from typing import List
+from typing import List, Dict, Any, Optional
 from app.schemas.feature import FeatureRow, FeatureRowRetrieve
 from app.client import prisma_client as prisma
 from datetime import date, datetime, time
+import redis
 
 router = APIRouter()
+
+# Redis connection function
+def get_redis_client():
+    try:
+        redis_client = redis.Redis(host='host.docker.internal', port=6379, db=0)
+        # Test connection
+        redis_client.ping()
+        return redis_client
+    except redis.ConnectionError:
+        raise HTTPException(status_code=500, detail="Could not connect to Redis")
 
 @router.delete("/features/clear")
 async def clear_features():
@@ -88,3 +99,38 @@ async def get_features_by_date_range(
         return features
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving features: {str(e)}")
+
+@router.get("/redis/transactions/{cc_num}", response_model=Dict[str, Any])
+async def get_redis_transactions(cc_num: str):
+    """
+    Get the latest transaction data and statistics for a credit card from Redis
+    """
+    redis_client = get_redis_client()
+    
+    key_prefix = f"txn:{cc_num}"
+    stats_key = f"{key_prefix}:stats"
+    
+    if not redis_client.exists(stats_key):
+        raise HTTPException(status_code=404, detail="No transaction data found for this credit card number")
+    
+    stats = redis_client.hgetall(stats_key)
+    
+    timeline_key = f"{key_prefix}:timeline"
+    recent_transactions = []
+
+    if redis_client.exists(timeline_key):
+        # Get the 5 most recent transaction IDs
+        recent_txn_ids = redis_client.zrevrange(timeline_key, 0, 4)
+        string_data = [b.decode('utf-8') for b in recent_txn_ids]
+        
+        for txn_id in string_data:
+            txn_key = f"{key_prefix}:data:{txn_id}"
+            if redis_client.exists(txn_key):
+                txn_data = redis_client.hgetall(txn_key)
+                recent_transactions.append(txn_data)
+    
+    return {
+        "card_number": cc_num,
+        "stats": stats,
+        "recent_transactions": recent_transactions
+    }

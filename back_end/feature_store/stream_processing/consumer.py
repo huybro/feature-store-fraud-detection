@@ -23,20 +23,23 @@ class TxnCountLast10Min(ProcessWindowFunction):
     def process(self, key, context: ProcessWindowFunction.Context, elements: Iterable[dict]):
         elements_list = list(elements)
         count = len(elements_list)
-        yield({
-            'cc_num': key,
-            'txn_count_last_10_min': str(count)
-        })
+        for element in elements_list:
+            yield {
+                **element,
+                'txn_count_last_10_min': str(count)
+            }
 
 class AvgAmtLast1Hour(ProcessWindowFunction):
     def process(self, key, context: ProcessWindowFunction.Context, elements: Iterable[dict]):
         elements_list = list(elements)
         amounts = [float(e['amount']) for e in elements_list]
         avg = sum(amounts) / len(amounts)
-        yield({
-            'cc_num': key,
-            'avg_amt_last_1_hour': str(avg)
-        })
+
+        for element in elements_list:
+            yield {
+                **element,
+                'avg_amt_last_1_hour': str(avg)
+            }
 
 class CombineTxnAndAvg(CoProcessFunction):
     def open(self, runtime_context: RuntimeContext):
@@ -96,7 +99,7 @@ class RedisWriter(MapFunction):
                 self.redis_client = redis.Redis(host=self.host, port=self.port, db=self.db)
             
             # Get transaction ID or generate one if not present
-            txn_id = value.get('transaction_id', f"txn_{datetime.datetime.now().timestamp()}")
+            txn_id = value.get('txn_id')
             
             # Use cc_num as key prefix
             key_prefix = f"txn:{value['cc_num']}"
