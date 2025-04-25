@@ -11,14 +11,10 @@ producer = KafkaProducer(
     value_serializer=lambda v: json.dumps(v).encode('utf-8')
 )
 
-CC_NUM_POOL = [
-    f"{random.choice(['5018', '5020', '5038', '6304'])}{''.join(str(random.randint(0, 9)) for _ in range(10))}"
-    for _ in range(50)
-]
+CC_NUM_POOL = [str(i) for i in range(983)]
 
 def get_random_cc_num():
-    # Bias: some repeat, some less frequent
-    return random.choices(CC_NUM_POOL, k=1)[0]
+    return random.choice(CC_NUM_POOL)
 
 def generate_fake_transaction():
     raw_data = {

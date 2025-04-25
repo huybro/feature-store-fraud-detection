@@ -17,8 +17,8 @@ print(f"Is cc_num sorted in ascending order? {is_sorted}")
 print("\n📊 Summary Statistics:\n")
 print(df[['cc_num', 'amt', 'lat', 'long', 'merch_lat', 'merch_long']].describe(include='all'))
 
-# Save the preprocessed DataFrame to a CSV file
-"""output_file = './back_end/data/credit_card_transactions.csv'
+df['cc_num'] = pd.factorize(df['cc_num'])[0]
+output_file = './back_end/data/credit_card_transactions.csv'
 df.to_csv(output_file, index=False)
-print(f"Preprocessed data saved to {output_file}")"""
+print(f"Preprocessed data saved to {output_file}")
 

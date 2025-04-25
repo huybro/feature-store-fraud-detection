@@ -53,22 +53,4 @@ df.write.csv(output_path, header=True, mode="overwrite")
 
 spark.stop()
 
-# Find the output part file
-part_files = glob.glob(os.path.join(output_path, "part-*.csv"))
-if not part_files:
-    raise FileNotFoundError("No output part file found in output_features directory.")
 
-df_pd = pd.read_csv(part_files[0])
-df_pd = df_pd.fillna(0)
-records = df_pd.to_dict(orient="records")
-
-# Function to send data in chunks
-def post_in_chunks(records, batch_size=1000):
-    for i in range(0, len(records), batch_size):
-        chunk = records[i:i + batch_size]
-        res = requests.post("http://localhost:8000/api/v1/features/batch", json=chunk)
-        print(f"Sent {i}–{i+len(chunk)}: {res.status_code}")
-        if res.status_code != 200:
-            print(res.json())
-
-post_in_chunks(records)

@@ -4,6 +4,7 @@ from app.schemas.feature import FeatureRow, FeatureRowRetrieve
 from app.client import prisma_client as prisma
 from datetime import date, datetime, time
 import redis
+import asyncio
 
 router = APIRouter()
 
@@ -19,35 +20,35 @@ def get_redis_client():
 
 @router.delete("/features/clear")
 async def clear_features():
-     if not prisma.is_connected():
-         await prisma.connect()
-     await prisma.creditcardfeature.delete_many()
-     return {"status": "success", "message": "All features deleted."}
+    await prisma.creditcardfeature.delete_many()
+    return {"status": "success", "message": "All features deleted."}
 
 @router.post("/features/batch")
 async def ingest_features(features: List[FeatureRow]):
-    if not prisma.is_connected():
-        await prisma.connect()
-
     try:
-        for feature in features:
-            await prisma.creditcardfeature.create(
+        tasks = [
+            prisma.creditcardfeature.create(
                 data={
-                    "cc_num": feature.cc_num,
-                    "amt": feature.amt,
-                    "hour_of_day": feature.hour_of_day,
-                    "day_of_week": feature.day_of_week,
-                    "age_at_txn": feature.age_at_txn,
-                    "distance_to_merchant": feature.distance_to_merchant,
-                    "txn_count_last_10_min": feature.txn_count_last_10_min,
-                    "avg_amt_last_1_hour": feature.avg_amt_last_1_hour,
-                    "category": feature.category,
-                    "gender": feature.gender,
-                    "city_pop": feature.city_pop,
-                    "feature_timestamp": feature.trans_date_trans_time,
-                    "is_fraud": feature.is_fraud
+                    "cc_num": f.cc_num,
+                    "amt": f.amt,
+                    "hour_of_day": f.hour_of_day,
+                    "day_of_week": f.day_of_week,
+                    "age_at_txn": f.age_at_txn,
+                    "distance_to_merchant": f.distance_to_merchant,
+                    "txn_count_last_10_min": f.txn_count_last_10_min,
+                    "avg_amt_last_1_hour": f.avg_amt_last_1_hour,
+                    "category": f.category,
+                    "gender": f.gender,
+                    "city_pop": f.city_pop,
+                    "feature_timestamp": f.trans_date_trans_time,
+                    "is_fraud": f.is_fraud
                 }
             )
+            for f in features
+        ]
+
+        await asyncio.gather(*tasks)  # Run them concurrently
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error inserting features: {str(e)}")
 
@@ -56,9 +57,6 @@ async def ingest_features(features: List[FeatureRow]):
 # sample : http://localhost:8000/api/v1/features/by-ccnum/60422928733
 @router.get("/features/by-ccnum/{cc_num}", response_model=List[FeatureRowRetrieve])
 async def get_features_by_ccnum(cc_num: str):
-    if not prisma.is_connected():
-        await prisma.connect()
-
     try:
         features = await prisma.creditcardfeature.find_many(
             where={"cc_num": int(cc_num)}
@@ -75,9 +73,6 @@ async def get_features_by_date_range(
     start: date = Query(..., description="Start date (YYYY-MM-DD)"),
     end: date = Query(..., description="End date (YYYY-MM-DD)")
 ):
-    if not prisma.is_connected():
-        await prisma.connect()
-
     if start > end:
         raise HTTPException(status_code=400, detail="Start date must be on or before end date.")
 
@@ -134,3 +129,40 @@ async def get_redis_transactions(cc_num: str):
         "stats": stats,
         "recent_transactions": recent_transactions
     }
+
+
+@router.post("/features/sync")
+async def sync_features_from_redis():
+    try:
+        redis_client = get_redis_client()
+
+        features = await prisma.creditcardfeature.find_many()
+
+        updated = 0
+        skipped = 0
+
+        for row in features:
+            row_dict = row.model_dump()
+            cc_num = row_dict['cc_num']
+            redis_key = f"txn:{cc_num}:stats"
+
+            if redis_client.exists(redis_key):
+                static_data = {
+                    k: str(v) for k, v in row_dict.items()
+                    if k in ['hour_of_day', 'day_of_week', 'age_at_txn', 'category', 'gender', 'city_pop']
+                    and v is not None
+                }
+                redis_client.hset(redis_key, mapping=static_data)
+                updated += 1
+            else:
+                skipped += 1
+
+        return {
+            "status": "success",
+            "updated": updated,
+            "skipped": skipped,
+            "message": f"Synced {updated} records. Skipped {skipped} missing Redis keys."
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error syncing features: {str(e)}")
