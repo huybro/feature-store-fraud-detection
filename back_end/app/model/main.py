@@ -1,74 +1,104 @@
 import pandas as pd
+import numpy as np
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import classification_report, roc_auc_score
+from sklearn.preprocessing import StandardScaler, LabelEncoder
 import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader, TensorDataset
+from torch import nn, optim
+from torch.utils.data import Dataset, DataLoader
 
-dataset = load_dataset("pointe77/credit-card-transaction")
-df = pd.DataFrame(dataset["train"])
+import glob
 
-X = df.drop("Class", axis=1)
-y = df["Class"]
+csv_files = glob.glob("./data/part-*.csv")  # Adjust to your actual directory
+df = pd.concat([pd.read_csv(f) for f in csv_files], ignore_index=True)
+print(f"Combined {len(csv_files)} files into one DataFrame with {len(df)} rows.")
 
+# Drop high-cardinality or irrelevant columns
+df = df.drop(columns=["cc_num", "trans_date_trans_time"])
+
+# Label encode categorical features
+categorical = ["category", "gender", "day_of_week"]
+for col in categorical:
+    df[col] = LabelEncoder().fit_transform(df[col].astype(str))
+
+# Handle imbalance: downsample non-fraud (or use class weights later)
+fraud_df = df[df["is_fraud"] == 1]
+non_fraud_df = df[df["is_fraud"] == 0].sample(n=len(fraud_df)*5, random_state=42)
+df = pd.concat([fraud_df, non_fraud_df]).sample(frac=1, random_state=42)
+
+# Separate features/labels
+X = df.drop("is_fraud", axis=1)
+y = df["is_fraud"]
+
+# Normalize numerical features
 scaler = StandardScaler()
 X_scaled = scaler.fit_transform(X)
 
+# Train/test split
 X_train, X_test, y_train, y_test = train_test_split(
-    X_scaled, y, test_size=0.2, stratify=y, random_state=42
+    X_scaled, y, test_size=0.2, random_state=42
 )
 
-X_train_tensor = torch.tensor(X_train, dtype=torch.float32)
-y_train_tensor = torch.tensor(y_train.values, dtype=torch.float32).unsqueeze(1)
-X_test_tensor = torch.tensor(X_test, dtype=torch.float32)
-y_test_tensor = torch.tensor(y_test.values, dtype=torch.float32).unsqueeze(1)
+# Dataset class
+class FraudDataset(Dataset):
+    def __init__(self, X, y):
+        self.X = torch.tensor(X, dtype=torch.float32)
+        self.y = torch.tensor(y.values, dtype=torch.float32)
 
-train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
-train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
+    def __len__(self):
+        return len(self.y)
 
-class CreditCardFraudModel(nn.Module):
-    def __init__(self, input_dim):
+    def __getitem__(self, idx):
+        return self.X[idx], self.y[idx]
+
+train_loader = DataLoader(FraudDataset(X_train, y_train), batch_size=1024, shuffle=True)
+test_loader = DataLoader(FraudDataset(X_test, y_test), batch_size=1024)
+
+# Model
+class FraudNet(nn.Module):
+    def __init__(self, in_features):
         super().__init__()
-        self.fc1 = nn.Linear(input_dim, 64)
-        self.bn1 = nn.BatchNorm1d(64)
-        self.fc2 = nn.Linear(64, 32)
-        self.bn2 = nn.BatchNorm1d(32)
-        self.output = nn.Linear(32, 1)
-        self.dropout = nn.Dropout(0.3)
+        self.net = nn.Sequential(
+            nn.Linear(in_features, 64),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(64, 32),
+            nn.ReLU(),
+            nn.Linear(32, 1),
+            nn.Sigmoid()
+        )
 
     def forward(self, x):
-        x = torch.relu(self.bn1(self.fc1(x)))
-        x = self.dropout(x)
-        x = torch.relu(self.bn2(self.fc2(x)))
-        x = self.dropout(x)
+        return self.net(x).squeeze()
 
-input_dim = X_train.shape[1]
-model = CreditCardFraudModel(input_dim)
+model = FraudNet(X_train.shape[1])
+loss_fn = nn.BCELoss()
+optimizer = optim.Adam(model.parameters(), lr=1e-3)
 
-pos_weight = torch.tensor([y_train.value_counts()[0] / y_train.value_counts()[1]], dtype=torch.float32)
-criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-
-epochs = 10
-for epoch in range(epochs):
+# Training
+for epoch in range(10):
     model.train()
-    epoch_loss = 0
-    for batch_X, batch_y in train_loader:
+    total_loss = 0
+    for X_batch, y_batch in train_loader:
         optimizer.zero_grad()
-        outputs = model(batch_X)
-        loss = criterion(outputs, batch_y)
+        pred = model(X_batch)
+        loss = loss_fn(pred, y_batch)
         loss.backward()
         optimizer.step()
-        epoch_loss += loss.item()
-    print(f"Epoch {epoch + 1}, Loss: {epoch_loss / len(train_loader):.4f}")
+        total_loss += loss.item()
+    print(f"Epoch {epoch+1}: Loss {total_loss:.4f}")
 
+# Evaluation
 model.eval()
+y_true, y_pred = [], []
 with torch.no_grad():
-    logits = model(X_test_tensor)
-    predictions = torch.sigmoid(logits)
-    predicted_labels = (predictions >= 0.5).int()
-    report = classification_report(y_test_tensor, predicted_labels)
-    auc_score = roc_auc_score(y_test_tensor, predictions)
+    for X_batch, y_batch in test_loader:
+        pred = model(X_batch)
+        y_pred.extend(pred.numpy())
+        y_true.extend(y_batch.numpy())
 
-report, auc_score
+# Binary predictions
+y_pred_label = [1 if p > 0.5 else 0 for p in y_pred]
+
+from sklearn.metrics import accuracy_score, f1_score
+print("Accuracy:", accuracy_score(y_true, y_pred_label))
+print("F1 Score:", f1_score(y_true, y_pred_label))
