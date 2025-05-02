@@ -1,10 +1,15 @@
 import pandas as pd
 import numpy as np
+import sys
 import os
 from datetime import datetime
 import time
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from sklearn.model_selection import train_test_split
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from model.training import CONFIG, train_model, evaluate_model, FraudDataset, DataLoader, DeepFraudNet
+import torch
+from sklearn.preprocessing import StandardScaler, LabelEncoder
 
 def process_credit_card_data(input_csv_path, output_csv_path):
     # Load data
@@ -61,89 +66,163 @@ def process_credit_card_data(input_csv_path, output_csv_path):
     # Save output
     df.to_csv(output_csv_path, index=False)
 
-def measure_average_testing_time(model, X_test, runs=3, sample_size=100_000):
-    X_sample = X_test.sample(n=min(sample_size, len(X_test)), random_state=42)
-    times = []
-    for _ in range(runs):
-        start = time.time()
-        _ = model.predict(X_sample)
-        end = time.time()
-        times.append(end - start)
-    avg_test_time = sum(times) / runs
-    print(f"\nAverage Testing Time over {runs} runs on {len(X_sample)} rows: {avg_test_time:.4f} sec")
-    return avg_test_time
+def preprocess_data(path_pattern):
+    df = pd.read_csv(path_pattern)
+    df = df.drop(columns=["cc_num", "trans_date_trans_time"])
+    categorical = ["category", "gender", "day_of_week"]
+    for col in categorical:
+        df[col] = LabelEncoder().fit_transform(df[col].astype(str))
 
-def run_experiment(data_path):
-    df = pd.read_csv(data_path)
-    X = df.drop(columns=['is_fraud', 'trans_date_trans_time'])
-    y = df['is_fraud']
+    fraud_df = df[df["is_fraud"] == 1]
+    non_fraud_df = df[df["is_fraud"] == 0].sample(n=len(fraud_df) * 5, random_state=42)
+    df = pd.concat([fraud_df, non_fraud_df]).sample(frac=1, random_state=42)
 
-    times = []
-    accuracies, precisions, recalls, f1s = [], [], [], []
-    test_times = []
+    X = df.drop("is_fraud", axis=1)
+    y = df["is_fraud"]
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+
+    return X_scaled, y 
+
+def run_training_experiment(data_path):
+    print(f"🔍 Loading full processed dataset from: {data_path}")
+
+    # Load once outside loop
+    full_df = pd.read_csv(data_path)
+
+    train_times = []
 
     for run in range(3):
-        print(f"\n=== Run {run+1}/3 ===")
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.25, shuffle=True, stratify=y
-        )
+        print(f"\n🚀 Training Run {run+1}/3")
+
+        # Step 1: Sample 75% each time
+        print("🔄 Sampling 75% of the dataset for this run...")
+        sampled_df = full_df.sample(frac=0.75, random_state=42 + run)
+
+        # Step 2: Save to temp CSV for preprocess_data
+        temp_path = data_path.replace(".csv", f"_train_75_run{run+1}.csv")
+        sampled_df.to_csv(temp_path, index=False)
+        print(f"✅ Sampled data saved to: {temp_path}")
+
+        # Step 3: Preprocess sampled data
+        X, y = preprocess_data(temp_path)
+
+        # Step 4: Split and train
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42 + run)
 
         start = time.time()
+        _ = train_model(X_train, y_train, X_test, y_test, CONFIG)
+        duration = time.time() - start
+        train_times.append(duration)
 
-        # === Define and train your model here ===
-        # model = YourModel()
-        # model.fit(X_train, y_train)
-        # y_pred = model.predict(X_test)
-        y_pred = [0] * len(y_test)  # Placeholder
-        model = None  # Placeholder
-        # === End model definition ===
+        print(f"✅ Training time for run {run+1}: {duration:.2f} sec")
 
-        end = time.time()
-        times.append(end - start)
+    # Final average
+    avg_train_time = sum(train_times) / 3
+    print(f"\n🕒 Average Training Time over 3 sampled runs: {avg_train_time:.2f} sec")
+    return avg_train_time
 
-        # Metrics
-        accuracies.append(accuracy_score(y_test, y_pred))
-        precisions.append(precision_score(y_test, y_pred, zero_division=0))
-        recalls.append(recall_score(y_test, y_pred, zero_division=0))
-        f1s.append(f1_score(y_test, y_pred, zero_division=0))
 
-        # If you used a real model, measure test time
-        if model is not None:
-            test_time = measure_average_testing_time(model, X_test)
-            test_times.append(test_time)
+def run_testing_experiment(input_csv_path):
+    print(f"🔍 Starting testing experiment using raw file: {input_csv_path}")
 
-    avg_metrics = {
-        "average_training_time": sum(times) / 3,
+    total_times = []
+    accuracies, precisions, recalls, f1s = [], [], [], []
+
+    for run in range(3):
+        print(f"\n🧪 === Testing Run {run+1}/3 ===")
+
+        # --- STEP 1: Sample 100K rows and save ---
+        print("🔄 Sampling 100,000 rows from input...")
+        df = pd.read_csv(input_csv_path)
+        sampled_df = df.sample(n=min(100_000, len(df)), random_state=42 + run)
+
+        base_dir = os.path.dirname(input_csv_path)
+        sample_input_csv = os.path.join(base_dir, f"sampled_input_run{run+1}.csv")
+        sample_output_csv = os.path.join(base_dir, f"output_features_python_sampled_run{run+1}.csv")
+
+        sampled_df.to_csv(sample_input_csv, index=False)
+        print(f"✅ Sample saved to: {sample_input_csv}")
+
+        # --- STEP 2: Start timer for total time (processing + inference) ---
+        run_start_time = time.time()
+
+        # Process sampled data
+        print("⚙️ Processing sampled dataset...")
+        process_credit_card_data(sample_input_csv, sample_output_csv)
+        print(f"✅ Processing complete → {sample_output_csv}")
+
+        # --- STEP 3: Load processed features and run inference ---
+        X, y = preprocess_data(sample_output_csv)
+        sample_dataset = FraudDataset(X, pd.Series([0] * len(X)))
+        sample_loader = DataLoader(sample_dataset, batch_size=CONFIG["batch_size"])
+
+        model = DeepFraudNet(X.shape[1], CONFIG["dropout_rate"])
+        model.load_state_dict(torch.load("fraud_model.pth"))
+        model.eval()
+
+        with torch.no_grad():
+            for i in range(3):
+                print(f"  ⏲ Inference Round {i+1}/3")
+                for X_batch, _ in sample_loader:
+                    _ = model(X_batch)
+
+        # --- STEP 4: Evaluate on full sample ---
+        with torch.no_grad():
+            y_probs = model(torch.tensor(X, dtype=torch.float32)).numpy()
+        y_preds = [1 if p > 0.5 else 0 for p in y_probs]
+        y_true = np.array(y)
+
+        acc = accuracy_score(y_true, y_preds)
+        precision = precision_score(y_true, y_preds, zero_division=0)
+        recall = recall_score(y_true, y_preds, zero_division=0)
+        f1 = f1_score(y_true, y_preds)
+
+        run_duration = time.time() - run_start_time
+        total_times.append(run_duration)
+
+        print(f"📊 Accuracy: {acc:.4f}, Precision: {precision:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}")
+        print(f"🕒 Total Time (processing + testing): {run_duration:.2f} sec")
+
+        accuracies.append(acc)
+        precisions.append(precision)
+        recalls.append(recall)
+        f1s.append(f1)
+
+    print("\n📉 === Averaged Results over 3 Sampled Runs ===")
+    print(f"🕒 Avg Total Time       : {sum(total_times)/3:.2f} sec")
+    print(f"🎯 Avg Accuracy         : {sum(accuracies)/3:.4f}")
+    print(f"📌 Avg Precision        : {sum(precisions)/3:.4f}")
+    print(f"📌 Avg Recall           : {sum(recalls)/3:.4f}")
+    print(f"📌 Avg F1 Score         : {sum(f1s)/3:.4f}")
+
+    return {
+        "average_total_time": sum(total_times) / 3,
         "average_accuracy": sum(accuracies) / 3,
         "average_precision": sum(precisions) / 3,
         "average_recall": sum(recalls) / 3,
-        "average_f1": sum(f1s) / 3,
-        "average_testing_time": sum(test_times) / len(test_times) if test_times else None
+        "average_f1": sum(f1s) / 3
     }
 
-    print("\n=== Averaged Results over 3 Runs ===")
-    for k, v in avg_metrics.items():
-        if v is None:
-            print(f"{k.replace('_', ' ').title()}: N/A (no model)")
-        elif 'time' in k:
-            print(f"{k.replace('_', ' ').title()}: {v:.4f} sec")
-        else:
-            print(f"{k.replace('_', ' ').title()}: {v:.4f}")
-
-    return avg_metrics
-
-# Define file paths
+# Paths
 base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+
+# Full dataset paths
 input_csv = os.path.join(base_dir, 'data', 'credit_card_transactions.csv')
 output_csv = os.path.join(base_dir, 'data', 'output_features_python.csv')
 
-# Measure processing time
-start = time.time()
-process_credit_card_data(input_csv, output_csv)
-end = time.time()
+# print("\n⚙️ Processing full dataset...")
+# start_full = time.time()
+# process_credit_card_data(input_csv, output_csv)
+# end_full = time.time()
+# print(f"✅ Full dataset processing completed in {end_full - start_full:.2f} seconds") #451.29 seconds
+# print(f"➡️ Output saved to: {output_csv}")
 
-processing_duration = end - start
-print(f"\nData processing completed in {processing_duration:.2f} seconds")
-
-# Run the experiment
-metrics = run_experiment(output_csv)
+# run_training_experiment(output_csv) #
+run_testing_experiment(input_csv)
+# 📉 === Averaged Results over 3 Sampled Runs ===
+# 🕒 Avg Total Time       : 26.07 sec
+# 🎯 Avg Accuracy         : 0.9635
+# 📌 Avg Precision        : 0.9267
+# 📌 Avg Recall           : 0.8492
+# 📌 Avg F1 Score         : 0.8859
