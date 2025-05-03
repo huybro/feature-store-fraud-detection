@@ -94,6 +94,26 @@ async def get_features_by_date_range(
         return features
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving features: {str(e)}")
+    
+@router.get("/redis/transactions/bulk", response_model=List[Dict[str, Any]])
+async def get_bulk_transactions(limit: int = 100_000):
+    """
+    Fetch up to `limit` transactions from Redis across all cards.
+    """
+    redis_client = get_redis_client()
+    keys = redis_client.scan_iter("txn:*:data:*")
+
+    records = []
+    count = 0
+    for txn_key in keys:
+        txn_data = redis_client.hgetall(txn_key)
+        clean_data = {k.decode('utf-8'): try_cast(v) for k, v in txn_data.items()}
+        records.append(clean_data)
+        count += 1
+        if count >= limit:
+            break
+
+    return records
 
 @router.get("/redis/transactions/{cc_num}", response_model=Dict[str, Any])
 async def get_redis_transactions(cc_num: str):
@@ -130,6 +150,15 @@ async def get_redis_transactions(cc_num: str):
         "recent_transactions": recent_transactions
     }
 
+
+def try_cast(value):
+    v = value.decode('utf-8')
+    try:
+        if '.' in v:
+            return float(v)
+        return int(v)
+    except ValueError:
+        return v
 
 @router.post("/features/sync")
 async def sync_features_from_redis():
