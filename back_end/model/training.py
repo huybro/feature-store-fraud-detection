@@ -122,12 +122,6 @@ def train_model(X_train, y_train, X_test, y_test, config):
             early_stop_counter = 0
             torch.save(model.state_dict(), "fraud_model.pth")
             print("✅ Model improved and saved.")
-        else:
-            early_stop_counter += 1
-            if early_stop_counter >= config["patience"] + 30:
-                print("🛑 Early stopping triggered.")
-                break
-
     return model
 
 def evaluate_model(model, X_test, y_test):
