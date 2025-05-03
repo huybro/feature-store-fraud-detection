@@ -218,11 +218,11 @@ output_csv = os.path.join(base_dir, 'data', 'output_features_python.csv')
 # print(f"✅ Full dataset processing completed in {end_full - start_full:.2f} seconds") #451.29 seconds
 # print(f"➡️ Output saved to: {output_csv}")
 
-# run_training_experiment(output_csv) #
-run_testing_experiment(input_csv)
+# run_training_experiment(output_csv) #76.42 seconds
+# run_testing_experiment(input_csv)
 # 📉 === Averaged Results over 3 Sampled Runs ===
-# 🕒 Avg Total Time       : 26.07 sec
-# 🎯 Avg Accuracy         : 0.9635
-# 📌 Avg Precision        : 0.9267
-# 📌 Avg Recall           : 0.8492
-# 📌 Avg F1 Score         : 0.8859
+# 🕒 Avg Total Time       : 25.92 sec
+# 🎯 Avg Accuracy         : 0.9645
+# 📌 Avg Precision        : 0.9042
+# 📌 Avg Recall           : 0.8822
+# 📌 Avg F1 Score         : 0.8927
