@@ -87,10 +87,10 @@ def preprocess_data(path_pattern):
 def run_training_experiment(data_path):
     print(f"🔍 Loading full processed dataset from: {data_path}")
 
-    # Load once outside loop
     full_df = pd.read_csv(data_path)
 
     train_times = []
+    accuracies, precisions, recalls, f1s = [], [], [], []
 
     for run in range(3):
         print(f"\n🚀 Training Run {run+1}/3")
@@ -111,49 +111,66 @@ def run_training_experiment(data_path):
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42 + run)
 
         start = time.time()
-        _ = train_model(X_train, y_train, X_test, y_test, CONFIG)
+        model = train_model(X_train, y_train, X_test, y_test, CONFIG)
         duration = time.time() - start
         train_times.append(duration)
 
         print(f"✅ Training time for run {run+1}: {duration:.2f} sec")
 
-    # Final average
+        # Evaluate on test set
+        with torch.no_grad():
+            y_probs = model(torch.tensor(X_test, dtype=torch.float32)).numpy()
+        y_preds = [1 if p > 0.5 else 0 for p in y_probs]
+        y_true = np.array(y_test)
+
+        acc = accuracy_score(y_true, y_preds)
+        precision = precision_score(y_true, y_preds, zero_division=0)
+        recall = recall_score(y_true, y_preds, zero_division=0)
+        f1 = f1_score(y_true, y_preds)
+
+        accuracies.append(acc)
+        precisions.append(precision)
+        recalls.append(recall)
+        f1s.append(f1)
+
     avg_train_time = sum(train_times) / 3
-    print(f"\n🕒 Average Training Time over 3 sampled runs: {avg_train_time:.2f} sec")
-    return avg_train_time
+    print(f"\n📊 === Averaged Training Results ===")
+    print(f"🕒 Avg Training Time : {avg_train_time:.2f} sec")
+    print(f"🎯 Avg Accuracy      : {sum(accuracies)/3:.4f}")
+    print(f"📌 Avg Precision     : {sum(precisions)/3:.4f}")
+    print(f"📌 Avg Recall        : {sum(recalls)/3:.4f}")
+    print(f"📌 Avg F1 Score      : {sum(f1s)/3:.4f}")
+
+    return {
+        "average_training_time": avg_train_time,
+        "average_accuracy": sum(accuracies) / 3,
+        "average_precision": sum(precisions) / 3,
+        "average_recall": sum(recalls) / 3,
+        "average_f1": sum(f1s) / 3
+    }
 
 
 def run_testing_experiment(input_csv_path):
     print(f"🔍 Starting testing experiment using raw file: {input_csv_path}")
 
     total_times = []
-    accuracies, precisions, recalls, f1s = [], [], [], []
 
     for run in range(3):
         print(f"\n🧪 === Testing Run {run+1}/3 ===")
 
-        # --- STEP 1: Sample 100K rows and save ---
-        print("🔄 Sampling 100,000 rows from input...")
         df = pd.read_csv(input_csv_path)
         sampled_df = df.sample(n=min(100_000, len(df)), random_state=42 + run)
 
         base_dir = os.path.dirname(input_csv_path)
         sample_input_csv = os.path.join(base_dir, f"sampled_input_run{run+1}.csv")
         sample_output_csv = os.path.join(base_dir, f"output_features_python_sampled_run{run+1}.csv")
-
         sampled_df.to_csv(sample_input_csv, index=False)
-        print(f"✅ Sample saved to: {sample_input_csv}")
 
-        # --- STEP 2: Start timer for total time (processing + inference) ---
-        run_start_time = time.time()
-
-        # Process sampled data
         print("⚙️ Processing sampled dataset...")
+        run_start_time = time.time()
         process_credit_card_data(sample_input_csv, sample_output_csv)
-        print(f"✅ Processing complete → {sample_output_csv}")
-
-        # --- STEP 3: Load processed features and run inference ---
         X, y = preprocess_data(sample_output_csv)
+
         sample_dataset = FraudDataset(X, pd.Series([0] * len(X)))
         sample_loader = DataLoader(sample_dataset, batch_size=CONFIG["batch_size"])
 
@@ -162,47 +179,17 @@ def run_testing_experiment(input_csv_path):
         model.eval()
 
         with torch.no_grad():
-            for i in range(3):
-                print(f"  ⏲ Inference Round {i+1}/3")
-                for X_batch, _ in sample_loader:
-                    _ = model(X_batch)
-
-        # --- STEP 4: Evaluate on full sample ---
-        with torch.no_grad():
-            y_probs = model(torch.tensor(X, dtype=torch.float32)).numpy()
-        y_preds = [1 if p > 0.5 else 0 for p in y_probs]
-        y_true = np.array(y)
-
-        acc = accuracy_score(y_true, y_preds)
-        precision = precision_score(y_true, y_preds, zero_division=0)
-        recall = recall_score(y_true, y_preds, zero_division=0)
-        f1 = f1_score(y_true, y_preds)
+            for X_batch, _ in sample_loader:
+                _ = model(X_batch)
 
         run_duration = time.time() - run_start_time
         total_times.append(run_duration)
+        print(f"🕒 Total Time (processing + inference): {run_duration:.2f} sec")
 
-        print(f"📊 Accuracy: {acc:.4f}, Precision: {precision:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}")
-        print(f"🕒 Total Time (processing + testing): {run_duration:.2f} sec")
+    avg_total_time = sum(total_times) / 3
+    print(f"\n📉 === Avg Total Inference Time over 3 Runs: {avg_total_time:.2f} sec")
+    return {"average_total_time": avg_total_time}
 
-        accuracies.append(acc)
-        precisions.append(precision)
-        recalls.append(recall)
-        f1s.append(f1)
-
-    print("\n📉 === Averaged Results over 3 Sampled Runs ===")
-    print(f"🕒 Avg Total Time       : {sum(total_times)/3:.2f} sec")
-    print(f"🎯 Avg Accuracy         : {sum(accuracies)/3:.4f}")
-    print(f"📌 Avg Precision        : {sum(precisions)/3:.4f}")
-    print(f"📌 Avg Recall           : {sum(recalls)/3:.4f}")
-    print(f"📌 Avg F1 Score         : {sum(f1s)/3:.4f}")
-
-    return {
-        "average_total_time": sum(total_times) / 3,
-        "average_accuracy": sum(accuracies) / 3,
-        "average_precision": sum(precisions) / 3,
-        "average_recall": sum(recalls) / 3,
-        "average_f1": sum(f1s) / 3
-    }
 
 # Paths
 base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -218,11 +205,11 @@ output_csv = os.path.join(base_dir, 'data', 'output_features_python.csv')
 # print(f"✅ Full dataset processing completed in {end_full - start_full:.2f} seconds") #451.29 seconds
 # print(f"➡️ Output saved to: {output_csv}")
 
-# run_training_experiment(output_csv) #76.42 seconds
-# run_testing_experiment(input_csv)
-# 📉 === Averaged Results over 3 Sampled Runs ===
-# 🕒 Avg Total Time       : 25.92 sec
-# 🎯 Avg Accuracy         : 0.9645
-# 📌 Avg Precision        : 0.9042
-# 📌 Avg Recall           : 0.8822
-# 📌 Avg F1 Score         : 0.8927
+# run_training_experiment(output_csv) 
+# 📊 === Averaged Training Results ===
+# 🕒 Avg Training Time : 76.34 sec
+# 🎯 Avg Accuracy      : 0.9740
+# 📌 Avg Precision     : 0.9600
+# 📌 Avg Recall        : 0.8822
+# 📌 Avg F1 Score      : 0.9194
+# run_testing_experiment(input_csv) #25.61 sec
