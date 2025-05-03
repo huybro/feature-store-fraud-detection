@@ -119,7 +119,7 @@ def run_inference_experiment(df, model):
 
 if __name__ == "__main__":
     # Train Phase
-    print("🔍 Crawling training data via API...")
+    """print("🔍 Crawling training data via API...")
     crawl_start_time = time.time()
     print(f"⏱ Started crawling at: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(crawl_start_time))}")
 
@@ -144,7 +144,7 @@ if __name__ == "__main__":
     print(f"💾 Saved to {output_path}")
 
     # Run training benchmark
-    trained_model = run_training_experiment(output_path)
+    trained_model = run_training_experiment(output_path)"""
 
     # Inference Phase
     print("\n🔍 Crawling 100,000 rows for inference via /redis/transactions/bulk...")

@@ -98,16 +98,21 @@ async def get_features_by_date_range(
 @router.get("/redis/transactions/bulk", response_model=List[Dict[str, Any]])
 async def get_bulk_transactions(limit: int = 100_000):
     """
-    Fetch up to `limit` transactions from Redis across all cards.
+    Fetch up to `limit` aggregated transaction stats from Redis across all cards.
     """
     redis_client = get_redis_client()
-    keys = redis_client.scan_iter("txn:*:data:*")
+    keys = redis_client.scan_iter("txn:*:stats")  # ✅ Scan stats keys instead of data
 
     records = []
     count = 0
-    for txn_key in keys:
-        txn_data = redis_client.hgetall(txn_key)
-        clean_data = {k.decode('utf-8'): try_cast(v) for k, v in txn_data.items()}
+    for stats_key in keys:
+        stats_data = redis_client.hgetall(stats_key)
+        clean_data = {k.decode('utf-8'): try_cast(v) for k, v in stats_data.items()}
+        
+        # Optional: include cc_num extracted from the key
+        cc_num = stats_key.decode('utf-8').split(':')[1]
+        clean_data['cc_num'] = cc_num
+
         records.append(clean_data)
         count += 1
         if count >= limit:
