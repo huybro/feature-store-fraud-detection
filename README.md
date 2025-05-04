@@ -19,9 +19,10 @@ This project implements a **feature store** designed for fraud detection using *
 - ✅ **Fraud Detection Model:**  
   - Deep learning model (`DeepFraudNet`) implemented using **PyTorch**.
   - Supports **training experiments** and **benchmarking inference performance**.
-
+"""
 ## 🏗️ Architecture
 
+```mermaid
 graph TD
     A[Kafka Transaction Stream] --> B[Real-time Feature Computation (PyFlink)]
     G[Batch Feature Computation (Spark)] --> D[Offline Store (PostgreSQL)]
@@ -30,7 +31,7 @@ graph TD
     E[FastAPI Server]
     C --> E
     D --> E
-    E --> F[Model Training / Inference Flow]
+    E --> F[Model Training / Inference Flow]"""
     
 ## 📂 Project Structure
 
