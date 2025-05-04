@@ -163,7 +163,7 @@ python back_end/flows/baseline_flow.py
 | Setup           | Data Retrieval Time (sec) | Inference Time (sec) |
 |-----------------|---------------------------|----------------------|
 | Feature Store   | 0.97                      | 0.02                 |
-|   Baseline      |                         25.92 
+|   Baseline      |                           |  25.92               |
 
 ## 🚩 Future Improvements
 
