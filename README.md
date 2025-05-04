@@ -22,7 +22,6 @@ This project implements a **feature store** designed for fraud detection using *
 
 ## 🏗️ Architecture
 
-```mermaid
 graph TD
     A[Kafka Transaction Stream] --> B[Real-time Feature Computation (PyFlink)]
     G[Batch Feature Computation (Spark)] --> D[Offline Store (PostgreSQL)]
@@ -32,8 +31,7 @@ graph TD
     C --> E
     D --> E
     E --> F[Model Training / Inference Flow]
-```
-
+    
 ## 📂 Project Structure
 
 ```
