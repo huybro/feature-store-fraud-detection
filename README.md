@@ -31,7 +31,7 @@ graph TD
     E[FastAPI Server]
     C --> E
     D --> E
-    E --> F[Model Training / Inference Flow]"""
+    E --> F[Model Training / Inference Flow]
     
 ## 📂 Project Structure
 
