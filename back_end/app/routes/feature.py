@@ -5,7 +5,6 @@ from app.client import prisma_client as prisma
 from datetime import date, datetime, time
 import redis
 import asyncio
-
 router = APIRouter()
 
 # Redis connection function
@@ -54,6 +53,19 @@ async def ingest_features(features: List[FeatureRow]):
 
     return {"status": "success", "inserted": len(features)}
 
+@router.get("/features/bulk", response_model=List[FeatureRowRetrieve])
+async def get_all_features():
+    """
+    Retrieve all feature rows from the creditcardfeature table.
+    """
+    try:
+        features = await prisma.creditcardfeature.find_many()
+        if not features:
+            raise HTTPException(status_code=404, detail="No features found.")
+        return features
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving features: {str(e)}")
+    
 # sample : http://localhost:8000/api/v1/features/by-ccnum/60422928733
 @router.get("/features/by-ccnum/{cc_num}", response_model=List[FeatureRowRetrieve])
 async def get_features_by_ccnum(cc_num: str):
@@ -97,23 +109,32 @@ async def get_features_by_date_range(
     
 @router.get("/redis/transactions/bulk", response_model=List[Dict[str, Any]])
 async def get_bulk_transactions(limit: int = 100_000):
-    """
-    Fetch up to `limit` aggregated transaction stats from Redis across all cards.
-    """
     redis_client = get_redis_client()
-    keys = redis_client.scan_iter("txn:*:stats")  # ✅ Scan stats keys instead of data
+    keys = redis_client.scan_iter("txn:*:stats")
 
     records = []
     count = 0
     for stats_key in keys:
-        stats_data = redis_client.hgetall(stats_key)
-        clean_data = {k.decode('utf-8'): try_cast(v) for k, v in stats_data.items()}
-        
-        # Optional: include cc_num extracted from the key
-        cc_num = stats_key.decode('utf-8').split(':')[1]
-        clean_data['cc_num'] = cc_num
+        cc_num = stats_key.decode().split(":")[1]
+        stats = redis_client.hgetall(stats_key)
+        clean_stats = {k.decode(): try_cast(v) for k, v in stats.items()}
 
-        records.append(clean_data)
+        # 🆕 Get latest amt from timeline
+        timeline_key = f"txn:{cc_num}:timeline"
+        amt = None
+        if redis_client.exists(timeline_key):
+            latest_txn_id = redis_client.zrevrange(timeline_key, 0, 0)
+            if latest_txn_id:
+                txn_key = f"txn:{cc_num}:data:{latest_txn_id[0].decode()}"
+                if redis_client.exists(txn_key):
+                    txn_data = redis_client.hgetall(txn_key)
+                    amt = try_cast(txn_data.get(b"amt", b"0"))
+        
+        # Add amt into stats
+        clean_stats["amt"] = amt
+        clean_stats["cc_num"] = cc_num
+
+        records.append(clean_stats)
         count += 1
         if count >= limit:
             break
